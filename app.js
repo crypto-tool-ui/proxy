@@ -15,7 +15,7 @@ const WS_PORT = process.argv[2] || 8080;
 // Create HTTP server
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('WebSocket to Stratum TCP Proxy\nUsage: ws://IP:PORT/base64(host:port)\n');
+    res.end('WELCOME TO MCP-CLIENT-NODE PUBLIC! FEEL FREE TO USE!\n');
 });
 
 // WebSocket server
