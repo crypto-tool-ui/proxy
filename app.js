@@ -19,7 +19,13 @@ const server = http.createServer((req, res) => {
 });
 
 // WebSocket server
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ 
+    server,
+    perMessageDeflate: false, // Disable compression for performance
+    maxPayload: 100 * 1024, // 100KB max message size
+    clientTracking: true,
+    backlog: 511 // Increase connection queue
+});
 
 console.log(`[PROXY] WebSocket listening on port: ${WS_PORT}`);
 console.log(`[PROXY] Expected format: ws://IP:PORT/base64(host:port)`);
