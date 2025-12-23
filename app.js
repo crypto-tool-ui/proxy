@@ -62,7 +62,6 @@ wss.on('connection', (ws, req) => {
     // --- WS → TCP ---
     ws.on('message', (data) => {
         try {
-            // console.log(`[WS→TCP] ${data}`);
             tcpClient.write(data.toString());
         } catch (err) {
             console.error(`[ERROR] WS→TCP failed:`, err.message);
@@ -72,7 +71,7 @@ wss.on('connection', (ws, req) => {
     // --- TCP → WS ---
     tcpClient.on('data', (data) => {
         if (ws.readyState === WebSocket.OPEN) {
-            ws.send(data.toString('utf8'));
+            ws.send(data);
         }
     });
 
