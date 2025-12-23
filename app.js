@@ -23,8 +23,6 @@ const wss = new WebSocket.Server({
     server,
     perMessageDeflate: false, // Disable compression for performance
     maxPayload: 100 * 1024, // 100KB max message size
-    clientTracking: true,
-    backlog: 511 // Increase connection queue
 });
 
 console.log(`[PROXY] WebSocket listening on port: ${WS_PORT}`);
