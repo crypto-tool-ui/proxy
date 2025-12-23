@@ -10,12 +10,12 @@ const net = require('net');
 const http = require('http');
 
 // Configuration
-const WS_PORT = process.argv[2] || 8080;
+const WS_PORT = 8000;
 
 // Create HTTP server
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('WELCOME TO MCP-CLIENT-NODE PUBLIC! FEEL FREE TO USE!\n');
+    res.end('WELCOME TO MCP-CLIENT-NODE PUBLIC! FEEL FREE TO USE! \n');
 });
 
 // WebSocket server
@@ -75,15 +75,13 @@ wss.on('connection', (ws, req) => {
 
     // --- TCP → WS ---
     tcpClient.on('data', (data) => {
-        const msg = data.toString('utf8');
-        if (msg && ws.readyState === WebSocket.OPEN) {
-            ws.send(msg);
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(data.toString('utf8'));
         }
     });
 
     // --- Cleanup ---
     ws.on('close', () => {
-        // console.log(`[WS] Closed ${clientIp}`);
         tcpClient.end();
     });
 
