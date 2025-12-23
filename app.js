@@ -35,7 +35,6 @@ wss.on('connection', (ws, req) => {
     // --- Extract and decode target from URL ---
     const path = req.url?.slice(1); // remove leading "/"
     if (!path) {
-        ws.send(JSON.stringify({ error: "Missing base64 target in URL" }));
         ws.close();
         return;
     }
@@ -46,7 +45,6 @@ wss.on('connection', (ws, req) => {
         [host, port] = decoded.split(':');
         if (!host || !port) throw new Error("Invalid target format");
     } catch (err) {
-        ws.send(JSON.stringify({ error: "Invalid base64 target" }));
         console.error(`[ERROR] Base64 decode failed:`, err.message);
         ws.close();
         return;
