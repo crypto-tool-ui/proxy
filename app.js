@@ -10,7 +10,7 @@ const net = require('net');
 const http = require('http');
 
 // Configuration
-const WS_PORT = process.argv[2] || 8000;
+const WS_PORT = process.argv[2] || 8080;
 
 // Create HTTP server
 const server = http.createServer((req, res) => {
