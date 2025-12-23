@@ -65,7 +65,7 @@ uWS.App()
     // TCP → WS
     tcpClient.on('data', (data) => {
       if (!ws.closed) {
-        ws.send(data, true, false); // binary passthrough
+        ws.send(data.toString('utf8')); // binary passthrough
       }
     });
 
