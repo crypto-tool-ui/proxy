@@ -88,12 +88,12 @@ wss.on('connection', (ws, req) => {
     });
 
     tcpClient.on('close', () => {
-        // console.log(`[TCP] Pool socket closed`);
+        console.log(`[TCP] Pool socket closed`);
         if (ws.readyState === WebSocket.OPEN) ws.close();
     });
 
     tcpClient.on('error', (err) => {
-        // console.error(`[TCP ERROR]`, err.message);
+        console.error(`[TCP ERROR]`, err.message);
         if (ws.readyState === WebSocket.OPEN) ws.close();
     });
 
