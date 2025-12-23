@@ -62,8 +62,8 @@ wss.on('connection', (ws, req) => {
     // --- WS → TCP ---
     ws.on('message', (data) => {
         try {
-            console.log('TCP: ', data.toString());
-            tcpClient.write(data);
+            console.log('TCP: ', data.toString() );
+            tcpClient.write(data.toString() + "\n");
         } catch (err) {
             console.error(`[ERROR] WS→TCP failed:`, err.message);
         }
