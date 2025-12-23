@@ -61,7 +61,6 @@ wss.on('connection', (ws, req) => {
 
     tcpClient.connect(port, host, () => {
         console.log(`[WS] Connected from ${clientIp} -> ${host}:${port}`);
-        // ws.send(JSON.stringify({ status: "connected", target: `${host}:${port}` }));
     });
 
     // --- WS → TCP ---
@@ -78,7 +77,6 @@ wss.on('connection', (ws, req) => {
     tcpClient.on('data', (data) => {
         const msg = data.toString('utf8');
         if (msg && ws.readyState === WebSocket.OPEN) {
-            // console.log(`[TCP→WS] ${msg}`);
             ws.send(msg);
         }
     });
