@@ -71,7 +71,7 @@ wss.on('connection', (ws, req) => {
     // --- TCP → WS ---
     tcpClient.on('data', (data) => {
         if (ws.readyState === WebSocket.OPEN) {
-            ws.send(data);
+            ws.send(data.toString());
         }
     });
 
