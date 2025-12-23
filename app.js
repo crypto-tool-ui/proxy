@@ -10,7 +10,7 @@ const http = require('http');
 const dns = require('dns').promises;
 
 // Configuration
-const WS_PORT = 8000;
+const WS_PORT = 8080;
 
 // Create HTTP server
 const server = http.createServer((req, res) => {
@@ -51,14 +51,14 @@ wss.on('connection', async (ws, req) => {
         return;
     }
     
-    console.log(`[DNS] Resolving ${host} for client ${clientIp}...`);
+    // console.log(`[DNS] Resolving ${host} for client ${clientIp}...`);
     
     // --- DNS Lookup to get IP address ---
     let resolvedIp;
     try {
         const addresses = await dns.resolve4(host);
-        resolvedIp = addresses[0]; // Use first resolved IP
-        console.log(`[DNS] ${host} resolved to ${resolvedIp}`);
+        resolvedIp = addresses[0];
+        // console.log(`[DNS] ${host} resolved to ${resolvedIp}`);
     } catch (err) {
         console.error(`[DNS ERROR] Failed to resolve ${host}:`, err.message);
         ws.close();
