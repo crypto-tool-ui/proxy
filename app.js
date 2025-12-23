@@ -76,7 +76,7 @@ wss.on('connection', (ws, req) => {
 
     // --- TCP → WS ---
     tcpClient.on('data', (data) => {
-        const msg = data.toString();
+        const msg = data.toString('utf8');
         if (msg && ws.readyState === WebSocket.OPEN) {
             // console.log(`[TCP→WS] ${msg}`);
             ws.send(msg);
