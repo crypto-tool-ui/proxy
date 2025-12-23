@@ -76,7 +76,6 @@ wss.on('connection', async (ws, req) => {
     // --- WS → TCP ---
     ws.on('message', (data) => {
         try {
-            console.log('TCP: ', data.toString());
             tcpClient.write(data.toString() + "\n");
         } catch (err) {
             console.error(`[ERROR] WS→TCP failed:`, err.message);
@@ -86,24 +85,23 @@ wss.on('connection', async (ws, req) => {
     // --- TCP → WS ---
     tcpClient.on('data', (data) => {
         if (ws.readyState === WebSocket.OPEN) {
-            console.log('WS: ', data.toString());
             ws.send(data.toString());
         }
     });
     
     // --- Cleanup ---
     ws.on('close', () => {
-        console.log(`[WS] Connection closed from ${clientIp}`);
+        // console.log(`[WS] Connection closed from ${clientIp}`);
         tcpClient.end();
     });
     
     ws.on('error', (err) => {
-        console.error(`[WS ERROR]`, err.message);
+        // console.error(`[WS ERROR]`, err.message);
         tcpClient.end();
     });
     
     tcpClient.on('close', () => {
-        console.log(`[TCP] Pool socket closed for ${host} (${resolvedIp}):${port}`);
+        // console.log(`[TCP] Pool socket closed for ${host} (${resolvedIp}):${port}`);
         if (ws.readyState === WebSocket.OPEN) ws.close();
     });
     
@@ -113,7 +111,7 @@ wss.on('connection', async (ws, req) => {
     });
     
     tcpClient.on('timeout', () => {
-        console.log(`[TCP] Timeout for ${host} (${resolvedIp}):${port}`);
+        // console.log(`[TCP] Timeout for ${host} (${resolvedIp}):${port}`);
         tcpClient.end();
     });
 });
