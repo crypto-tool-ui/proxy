@@ -12,7 +12,7 @@ RUN npm install --production
 COPY . .
 
 # 5️⃣ Expose cổng 8080 ra ngoài container
-EXPOSE 8080
+EXPOSE 8000
 
 # 6️⃣ Start app
 CMD ["npm", "start"]
