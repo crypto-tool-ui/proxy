@@ -58,7 +58,6 @@ wss.on('connection', async (ws, req) => {
     try {
         const addresses = await dns.resolve4(host);
         resolvedIp = addresses[0];
-        // console.log(`[DNS] ${host} resolved to ${resolvedIp}`);
     } catch (err) {
         console.error(`[DNS ERROR] Failed to resolve ${host}:`, err.message);
         ws.close();
@@ -76,7 +75,7 @@ wss.on('connection', async (ws, req) => {
     // --- WS → TCP ---
     ws.on('message', (data) => {
         try {
-            tcpClient.write(data.toString() + "\n");
+            tcpClient.write(data.toString('utf8') + "\n");
         } catch (err) {
             console.error(`[ERROR] WS→TCP failed:`, err.message);
         }
@@ -85,7 +84,12 @@ wss.on('connection', async (ws, req) => {
     // --- TCP → WS ---
     tcpClient.on('data', (data) => {
         if (ws.readyState === WebSocket.OPEN) {
-            ws.send(data.toString());
+            try {
+                const text = data.toString('utf8');
+                ws.send(text, { binary: false });
+            } catch (err) {
+                console.error(`[ERROR] TCP→WS:`, err.message);
+            }
         }
     });
     
