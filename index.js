@@ -1,195 +1,124 @@
-#!/usr/bin/env node
-/**
- * WebSocket to TCP Stratum Proxy (uWebSockets.js)
- * Dynamic target pool via base64 URL:
- * ws://IP:PORT/base64(host:port)
- */
-import uWS from 'uWebSockets.js';
-import net from 'net';
-import dns from 'dns/promises';
-import { StringDecoder } from 'string_decoder';
+import uWS from "uWebSockets.js";
+import net from "net";
+import cluster from "cluster";
 
-const WS_PORT = Number(process.argv[2] || 8000);
+const PORT = 8000;
+const NUM_CPU = 2
 
-console.log(`[PROXY] WebSocket listening on port: ${WS_PORT}`);
-console.log(`[PROXY] Expected format: ws://IP:PORT/base64(host:port)`);
-console.log(`[PROXY] Ready to accept connections...`);
+if (cluster.isPrimary) {
+	let online = 0;
+	
+    for (let index = 0; index < NUM_CPU; index++) {
+        cluster.fork({ isWorker: true })
+    }
 
-uWS.App()
-  /* ---------- HTTP fallback ---------- */
-  .any('/*', (res, req) => {
-    res.writeHeader('Content-Type', 'text/plain');
-    res.end('WELCOME TO MCP-CLIENT-NODE PUBLIC! FEEL FREE TO USE!\n');
-  })
-  
-  /* ---------- WebSocket ---------- */
-  .ws('/*', {
-    compression: uWS.DISABLED,
-    maxPayloadLength: 100 * 1024,
-    idleTimeout: 300,
-    sendPingsAutomatically: false,
-    
-    async open(ws) {
-      const clientIp = Buffer.from(ws.getRemoteAddressAsText()).toString();
-      
-      // ---- decode base64 target ----
-      const path = ws.path?.slice(1);
-      if (!path) {
-        ws.send(JSON.stringify({ error: 'Missing base64 target in URL' }), false);
-        ws.close();
-        return;
-      }
-      
-      let host, port;
-      try {
-        const decoded = Buffer.from(path, 'base64').toString('utf8');
-        [host, port] = decoded.split(':');
-        if (!host || !port) throw new Error('Invalid target');
-      } catch (e) {
-        ws.send(JSON.stringify({ error: 'Invalid base64 target' }), false);
-        ws.close();
-        return;
-      }
-      
-      // ✅ DNS Resolution
-      let resolvedIp;
-      try {
-        const addresses = await dns.resolve4(host);
-        resolvedIp = addresses[0];
-      } catch (err) {
-        console.error(`[DNS ERROR] Failed to resolve ${host}:`, err.message);
-        ws.send(JSON.stringify({ error: `DNS resolution failed for ${host}` }), false);
-        ws.close();
-        return;
-      }
-      
-      console.log(`[WS] Connecting from ${clientIp} -> ${host} (${resolvedIp}):${port}`);
-      
-      // ---- TCP socket ----
-      const tcpClient = new net.Socket();
-      tcpClient.setNoDelay(true); // ✅ Disable Nagle's algorithm
-      tcpClient.setKeepAlive(true, 60000);
-      
-      // ✅ StringDecoder for proper UTF-8 handling
-      const decoder = new StringDecoder('utf8');
-      
-      // ✅ Line buffer for Stratum protocol
-      let lineBuffer = '';
-      let isConnected = false;
-      
-      // Store references
-      ws.tcpClient = tcpClient;
-      ws.decoder = decoder;
-      ws.lineBuffer = lineBuffer;
-      ws.isConnected = false;
-      
-      tcpClient.connect(Number(port), resolvedIp, () => {
-        ws.isConnected = true;
-        console.log(`[TCP] Connected from ${clientIp} -> ${host} (${resolvedIp}):${port}`);
-        
-        // ✅ Send initial TEXT message
-        if (!ws.closed) {
-          ws.send(JSON.stringify({ 
-            type: 'connected', 
-            target: `${host}:${port}`,
-            ip: resolvedIp
-          }), false, false); // isBinary=false, compress=false
-        }
-      });
-      
-      // TCP → WS (✅ FIX: Proper UTF-8 handling)
-      tcpClient.on('data', (data) => {
-        if (ws.closed) return;
-        
-        try {
-          // ✅ Decode with StringDecoder (handles incomplete UTF-8)
-          const text = ws.decoder.write(data);
-          
-          if (text) {
-            // ✅ Line buffering for Stratum (JSON-RPC)
-            ws.lineBuffer += text;
-            const lines = ws.lineBuffer.split('\n');
-            ws.lineBuffer = lines.pop() || ''; // Keep incomplete line
-            
-            // ✅ Send each complete line as TEXT
-            lines.forEach(line => {
-              if (line.trim() && !ws.closed) {
-                ws.send(line, false, false); // TEXT mode, no compression
-              }
+	cluster.on('message', (w, message) => {
+		const { status, msg } = message;
+		if (status) {
+			online++;
+		} else {
+			online--;
+		}
+        console.log(msg + ` <-> WORKERS [${online}]`);
+	})
+} else {
+    const app = uWS.App();
+
+    // HTTP healthcheck
+    app.get("/", (res) => res.end("ok"));
+
+    // WebSocket <-> TCP proxy
+    app.ws("/*", {
+        compression: 0,
+        maxPayloadLength: 16 * 1024 * 1024,
+        idleTimeout: 300,
+        upgrade: (res, req, context) => {
+            res.upgrade(
+                {
+                    encoded: req.getUrl().slice(1),
+                    ip: Buffer.from(res.getRemoteAddressAsText()).toString()
+                },
+                req.getHeader("sec-websocket-key"),
+                req.getHeader("sec-websocket-protocol"),
+                req.getHeader("sec-websocket-extensions"),
+                context
+            );
+        },
+
+        open: (ws) => {
+            const decoded = Buffer.from(ws.encoded, "base64").toString("utf8");
+            const clientIp = ws.ip;
+            const [host, portStr] = decoded.split(":");
+            const port = parseInt(portStr, 10);
+
+            if (!host || !port) {
+                ws.end(1011, "Invalid address");
+                return;
+            }
+
+            // custom state
+            const tcp = net.createConnection({
+                host,
+                port
             });
-          }
-        } catch (err) {
-          console.error(`[ERROR] TCP→WS:`, err.message);
-        }
-      });
-      
-      tcpClient.on('close', () => {
-        // ✅ Flush remaining data
-        try {
-          if (!ws.closed) {
-            const remaining = ws.decoder.end();
-            if (remaining) {
-              ws.lineBuffer += remaining;
-            }
-            if (ws.lineBuffer.trim()) {
-              ws.send(ws.lineBuffer, false, false);
-            }
-          }
-        } catch (err) {
-          console.error(`[ERROR] Flush on close:`, err.message);
-        }
-        
-        ws.isConnected = false;
-        if (!ws.closed) ws.close();
-      });
-      
-      tcpClient.on('error', (err) => {
-        console.error(`[TCP ERROR] ${host} (${resolvedIp}):${port}:`, err.message);
-        ws.isConnected = false;
-        if (!ws.closed) ws.close();
-      });
-      
-      tcpClient.setTimeout(300000, () => {
-        console.log(`[TCP] Timeout for ${host}:${port}`);
-        tcpClient.end();
-      });
-    },
-    
-    message(ws, message, isBinary) {
-      // WS → TCP
-      if (!ws.isConnected) return;
-      
-      try {
-        const data = Buffer.from(message);
-        ws.tcpClient?.write(data);
-        ws.tcpClient?.write('\n');
-      } catch (err) {
-        console.error(`[ERROR] WS→TCP:`, err.message);
-      }
-    },
-    
-    close(ws, code, message) {
-      ws.isConnected = false;
-      ws.tcpClient?.end();
-    }
-  })
-  
-  .listen(WS_PORT, (token) => {
-    if (token) {
-      console.log(`[SERVER] Listening on port ${WS_PORT} (uWebSockets.js)`);
-    } else {
-      console.error('[SERVER] Failed to listen');
-      process.exit(1);
-    }
-  });
+            tcp.setTimeout(0);
+		    tcp.setNoDelay(true);
+            ws.isConnected = false;
+            ws.queue = [];
+            ws.tcp = tcp;
 
-// ✅ Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('[SERVER] Shutting down...');
-  process.exit(0);
-});
+            tcp.on("connect", () => {
+                ws.isConnected = true;
+                ws.queue.forEach(msg => tcp.write(msg + '\n'));
+                ws.queue.length = 0;
+				process.send({ status: true, msg: `🟢 SUCCESS: WS [${clientIp}] <-> TCP [${host}:${port}]` });
+            });
 
-process.on('SIGINT', () => {
-  console.log('[SERVER] Shutting down...');
-  process.exit(0);
-});
+            tcp.on("data", (data) => {
+                try {
+                    ws.send(data.toString('utf-8'), false);
+                } catch (err) {
+                    console.error("WS send failed:", err.message);
+                }
+            });
+
+            tcp.on("close", () => {
+                if (ws.isOpen) ws.end(1000, "TCP closed");
+            });
+
+            tcp.on("error", (err) => {
+                console.error(`TCP error: ${err.message}`);
+                if (ws.isOpen) ws.end(1011, err.message);
+            });
+        },
+
+        tcpSend: (ws, msg) => {
+            if (!ws.isConnected) return;
+            const text = msg.endsWith("\n") ? msg : msg + "\n";
+            ws.tcp.write(text);
+        },
+
+        message: (ws, msg) => {
+            const data = Buffer.from(msg);
+            if (ws.isConnected) {
+                ws.tcp.write(data.toString('utf-8') + "\n");
+            } else {
+                ws.queue.push(data.toString('utf-8'));
+                if (ws.queue.length > MAX_QUEUE) {
+                    ws.end(1013, "Backpressure");
+                }
+            }
+        },
+
+        close: (ws) => {
+            const clientIp = ws.ip;
+            if (ws.tcp && !ws.tcp.destroyed) ws.tcp.destroy();
+			process.send({ status: false, msg: `🔴 DISCONNECTED: WS [${clientIp}]` });
+        },
+    });
+
+    app.listen("0.0.0.0", PORT, (t) => {
+        if (t) console.log(`🚀 WS⇄TCP proxy running on port ${PORT}`);
+        else console.error("❌ Failed to listen");
+    });
+}
