@@ -31,8 +31,6 @@ console.log(`[PROXY] Ready to accept connections...\n`);
 
 wss.on('connection', async (ws, req) => {
     const clientIp = req.socket.remoteAddress;
-    let tcpReady = false;
-    const pendingQueue = [];
     
     // --- Extract and decode target from URL ---
     const path = req.url?.slice(1); // remove leading "/"
@@ -71,49 +69,26 @@ wss.on('connection', async (ws, req) => {
     // --- TCP connect to resolved IP ---
     const tcpClient = new net.Socket();
     tcpClient.connect(port, resolvedIp, () => {
-        tcpReady = true;
-        tcpClient.setNoDelay(true);
-        tcpClient.setKeepAlive(true, 30000);
-    
-        // Flush queue
-        for (const msg of pendingQueue) {
-            tcpClient.write(msg);
-        }
-        pendingQueue.length = 0;
+        console.log(`[TCP] Connected from ${clientIp} -> ${host} (${resolvedIp}):${port}`);
     });
     
     // --- WS → TCP ---
-    let wsBuffer = "";
     ws.on('message', (data) => {
-        wsBuffer += data.toString('utf8');
-    
-        let lines = wsBuffer.split("\n");
-        wsBuffer = lines.pop();
-    
-        for (const line of lines) {
-            if (!line.trim()) continue;
-            const payload = line + "\n";
-    
-            if (!tcpReady) {
-                pendingQueue.push(payload);
-            } else if (tcpClient.writable) {
-                tcpClient.write(payload);
-            }
+        try {
+            tcpClient.write(data.toString('utf8') + "\n");
+        } catch (err) {
+            console.error(`[ERROR] WS→TCP failed:`, err.message);
         }
     });
     
     // --- TCP → WS ---
-    let tcpBuffer = "";
-
     tcpClient.on('data', (data) => {
-        tcpBuffer += data.toString('utf8');
-    
-        let lines = tcpBuffer.split("\n");
-        tcpBuffer = lines.pop();
-    
-        for (const line of lines) {
-            if (ws.readyState === WebSocket.OPEN && line.trim().length > 0) {
-                ws.send(line + "\n");
+        if (ws.readyState === WebSocket.OPEN) {
+            try {
+                const text = data.toString('utf8');
+                ws.send(text, { binary: false });
+            } catch (err) {
+                console.error(`[ERROR] TCP→WS:`, err.message);
             }
         }
     });
