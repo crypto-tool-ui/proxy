@@ -1,124 +1,104 @@
 import uWS from "uWebSockets.js";
 import net from "net";
-import cluster from "cluster";
 
 const PORT = 8000;
-const NUM_CPU = 2
+const app = uWS.App();
 
-if (cluster.isPrimary) {
-	let online = 0;
-	
-    for (let index = 0; index < NUM_CPU; index++) {
-        cluster.fork({ isWorker: true })
-    }
+// HTTP healthcheck
+app.get("/", (res) => {
+    res.writeHeader("Content-Type", "text/plain; charset=utf-8");
+    res.end("MCP SERVER STATUS: RUNNING!");
+});
 
-	cluster.on('message', (w, message) => {
-		const { status, msg } = message;
-		if (status) {
-			online++;
-		} else {
-			online--;
-		}
-        console.log(msg + ` <-> WORKERS [${online}]`);
-	})
-} else {
-    const app = uWS.App();
+// WebSocket <-> TCP proxy
+app.ws("/*", {
+    compression: 0,
+    maxPayloadLength: 16 * 1024 * 1024,
+    idleTimeout: 300,
+    upgrade: (res, req, context) => {
+        res.upgrade(
+            {
+                encoded: req.getUrl().slice(1),
+                ip: Buffer.from(res.getRemoteAddressAsText()).toString()
+            },
+            req.getHeader("sec-websocket-key"),
+            req.getHeader("sec-websocket-protocol"),
+            req.getHeader("sec-websocket-extensions"),
+            context
+        );
+    },
 
-    // HTTP healthcheck
-    app.get("/", (res) => res.end("ok"));
+    open: (ws) => {
+        const decoded = Buffer.from(ws.encoded, "base64").toString("utf8");
+        const clientIp = ws.ip;
+        const [host, portStr] = decoded.split(":");
+        const port = parseInt(portStr, 10);
 
-    // WebSocket <-> TCP proxy
-    app.ws("/*", {
-        compression: 0,
-        maxPayloadLength: 16 * 1024 * 1024,
-        idleTimeout: 300,
-        upgrade: (res, req, context) => {
-            res.upgrade(
-                {
-                    encoded: req.getUrl().slice(1),
-                    ip: Buffer.from(res.getRemoteAddressAsText()).toString()
-                },
-                req.getHeader("sec-websocket-key"),
-                req.getHeader("sec-websocket-protocol"),
-                req.getHeader("sec-websocket-extensions"),
-                context
-            );
-        },
+        if (!host || !port) {
+            ws.end(1011, "Invalid address");
+            return;
+        }
 
-        open: (ws) => {
-            const decoded = Buffer.from(ws.encoded, "base64").toString("utf8");
-            const clientIp = ws.ip;
-            const [host, portStr] = decoded.split(":");
-            const port = parseInt(portStr, 10);
+        // custom state
+        const tcp = net.createConnection({
+            host,
+            port
+        });
+        tcp.setTimeout(0);
+        tcp.setNoDelay(true);
 
-            if (!host || !port) {
-                ws.end(1011, "Invalid address");
-                return;
+        ws.isConnected = false;
+        ws.queue = [];
+        ws.tcp = tcp;
+
+        tcp.on("connect", () => {
+            ws.isConnected = true;
+            ws.queue.forEach(msg => tcp.write(msg + '\n'));
+            ws.queue.length = 0;
+            console.log(`🟢 SUCCESS: WS [${clientIp}] <-> TCP [${host}:${port}]`);
+        });
+
+        tcp.on("data", (data) => {
+            try {
+                ws.send(data.toString('utf-8'), false);
+            } catch (err) {
+                console.error("WS send failed:", err.message);
             }
+        });
 
-            // custom state
-            const tcp = net.createConnection({
-                host,
-                port
-            });
-            tcp.setTimeout(0);
-		    tcp.setNoDelay(true);
-            ws.isConnected = false;
-            ws.queue = [];
-            ws.tcp = tcp;
+        tcp.on("close", () => {
+            if (ws.isOpen) ws.end(1000, "TCP closed");
+        });
 
-            tcp.on("connect", () => {
-                ws.isConnected = true;
-                ws.queue.forEach(msg => tcp.write(msg + '\n'));
-                ws.queue.length = 0;
-				process.send({ status: true, msg: `🟢 SUCCESS: WS [${clientIp}] <-> TCP [${host}:${port}]` });
-            });
+        tcp.on("error", (err) => {
+            console.error(`TCP error: ${err.message}`);
+            if (ws.isOpen) ws.end(1011, err.message);
+        });
+    },
 
-            tcp.on("data", (data) => {
-                try {
-                    ws.send(data.toString('utf-8'), false);
-                } catch (err) {
-                    console.error("WS send failed:", err.message);
-                }
-            });
+    tcpSend: (ws, msg) => {
+        if (!ws.isConnected) return;
+        const text = msg.endsWith("\n") ? msg : msg + "\n";
+        ws.tcp.write(text);
+    },
 
-            tcp.on("close", () => {
-                if (ws.isOpen) ws.end(1000, "TCP closed");
-            });
+    message: (ws, msg) => {
+        const data = Buffer.from(msg);
+        if (ws.isConnected) {
+            ws.tcp.write(data.toString('utf-8') + "\n");
+        } else {
+            ws.queue.push(data.toString('utf-8'));
+        }
+    },
 
-            tcp.on("error", (err) => {
-                console.error(`TCP error: ${err.message}`);
-                if (ws.isOpen) ws.end(1011, err.message);
-            });
-        },
+    close: (ws) => {
+        const clientIp = ws.ip;
+        if (ws.tcp && !ws.tcp.destroyed) ws.tcp.destroy();
+        console.log(`🔴 DISCONNECTED: WS [${clientIp}]`);
+    },
+});
 
-        tcpSend: (ws, msg) => {
-            if (!ws.isConnected) return;
-            const text = msg.endsWith("\n") ? msg : msg + "\n";
-            ws.tcp.write(text);
-        },
-
-        message: (ws, msg) => {
-            const data = Buffer.from(msg);
-            if (ws.isConnected) {
-                ws.tcp.write(data.toString('utf-8') + "\n");
-            } else {
-                ws.queue.push(data.toString('utf-8'));
-                if (ws.queue.length > MAX_QUEUE) {
-                    ws.end(1013, "Backpressure");
-                }
-            }
-        },
-
-        close: (ws) => {
-            const clientIp = ws.ip;
-            if (ws.tcp && !ws.tcp.destroyed) ws.tcp.destroy();
-			process.send({ status: false, msg: `🔴 DISCONNECTED: WS [${clientIp}]` });
-        },
-    });
-
-    app.listen("0.0.0.0", PORT, (t) => {
-        if (t) console.log(`🚀 WS⇄TCP proxy running on port ${PORT}`);
-        else console.error("❌ Failed to listen");
-    });
-}
+app.listen("0.0.0.0", PORT, (t) => {
+    if (t) console.log(`🚀 WS⇄TCP proxy running on port ${PORT}`);
+    else console.error("❌ Failed to listen");
+});
