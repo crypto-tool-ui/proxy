@@ -108,7 +108,7 @@ wss.on('connection', async (ws, req) => {
     });
     
     tcpClient.on('close', () => {
-        // console.log(`[TCP] Pool socket closed for ${host} (${resolvedIp}):${port}`);
+        console.log(`[TCP] Pool socket closed for ${host} (${resolvedIp}):${port}`);
         if (ws.readyState === WebSocket.OPEN) ws.close();
     });
     
