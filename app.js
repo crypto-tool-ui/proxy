@@ -76,7 +76,7 @@ wss.on('connection', async (ws, req) => {
     // --- WS → TCP ---
     ws.on('message', (data) => {
         try {
-            const msg = data.toString();
+            const msg = data.toString('utf-8');
             const message = msg.endsWith("\n") ? msg : msg + "\n";
             tcpClient.write(message);
         } catch (err) {
@@ -88,7 +88,7 @@ wss.on('connection', async (ws, req) => {
     tcpClient.on('data', (data) => {
         if (ws.readyState === WebSocket.OPEN) {
             try {
-                const text = data.toString();
+                const text = data.toString('utf-8');
                 ws.send(text, { binary: false });
             } catch (err) {
                 console.error(`[ERROR] TCP→WS:`, err.message);
