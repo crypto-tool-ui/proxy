@@ -1,7 +1,7 @@
 import uWS from "uWebSockets.js";
 import net from "net";
 
-const PORT = 8000;
+const PORT = 8080;
 const app = uWS.App();
 
 // Cấu hình giới hạn
