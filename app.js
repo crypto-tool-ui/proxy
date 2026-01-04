@@ -78,7 +78,7 @@ wss.on('connection', async (ws, req) => {
         try {
             const msg = data.toString('utf-8');
             const message = msg.endsWith("\n") ? msg : msg + "\n";
-            tcpClient.write(message);
+            tcpClient.write(data);
         } catch (err) {
             console.error(`[ERROR] WS→TCP failed:`, err.message);
         }
