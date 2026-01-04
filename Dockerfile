@@ -1,18 +1,26 @@
-# 1️⃣ Chọn base image Node.js
+# Sử dụng Node 20 có đầy đủ Debian libs
 FROM node:20
 
-# 2️⃣ Thư mục làm việc trong container
+# Cài công cụ build & Boost
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    python3 \
+    cmake \
+    git \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Thư mục làm việc
 WORKDIR /usr/src/app
 
-# 3️⃣ Copy package.json và cài dependencies
-COPY package*.json ./
-RUN npm install --production
-
-# 4️⃣ Copy toàn bộ source code
+# Sao chép file package
 COPY . .
 
-# 5️⃣ Expose cổng 8080 ra ngoài container
+# Cài dependencies (bao gồm cmake-js, node-gyp nếu có)
+RUN npm install
+
+# Mở port proxy
 EXPOSE 8080
 
-# 6️⃣ Start app
+# Chạy proxy bằng npm start
 CMD ["npm", "start"]
