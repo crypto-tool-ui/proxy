@@ -71,6 +71,7 @@ wss.on('connection', async (ws, req) => {
     tcpClient.connect(port, resolvedIp, () => {
         console.log(`[TCP] Connected from ${clientIp} -> ${host} (${resolvedIp}):${port}`);
     });
+    tcpClient.setNoDelay(true);
     
     // --- WS → TCP ---
     ws.on('message', (data) => {
