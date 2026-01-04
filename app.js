@@ -54,15 +54,15 @@ wss.on('connection', async (ws, req) => {
     // console.log(`[DNS] Resolving ${host} for client ${clientIp}...`);
     
     // --- DNS Lookup to get IP address ---
-    let resolvedIp;
-    try {
-        const addresses = await dns.resolve4(host);
-        resolvedIp = addresses[0];
-    } catch (err) {
-        console.error(`[DNS ERROR] Failed to resolve ${host}:`, err.message);
-        ws.close();
-        return;
-    }
+    let resolvedIp = host;
+    // try {
+    //     const addresses = await dns.resolve4(host);
+    //     resolvedIp = addresses[0];
+    // } catch (err) {
+    //     console.error(`[DNS ERROR] Failed to resolve ${host}:`, err.message);
+    //     ws.close();
+    //     return;
+    // }
     
     console.log(`[WS] Connecting from ${clientIp} -> ${host} (${resolvedIp}):${port}`);
     
