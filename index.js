@@ -10,7 +10,7 @@ const MAX_QUEUE_SIZE = 1000;           // tối đa 1000 message trong queue
 const MAX_PAYLOAD_LENGTH = 1024 * 1024; // 1MB WebSocket payload (tùy chỉnh lại nếu cần)
 const IDLE_TIMEOUT_SECONDS = 300;      // 5 phút
 
-const DEBUG = true;
+const DEBUG = false;
 
 // Chuẩn hóa message: đảm bảo có newline cuối
 function normalizeLine(msg) {
