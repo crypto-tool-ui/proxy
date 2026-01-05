@@ -10,7 +10,7 @@ const http = require('http');
 const dns = require('dns').promises;
 
 // Configuration
-const WS_PORT = 8080;
+const WS_PORT = process.env.PORT || 8080;
 
 // Create HTTP server
 const server = http.createServer((req, res) => {
@@ -70,6 +70,7 @@ wss.on('connection', async (ws, req) => {
         console.log(`[TCP] Connected from ${clientIp} -> ${host} (${resolvedIp}):${port}`);
     });
     tcpClient.setNoDelay(true);
+    tcpClient.setKeepAlive(true, 30000);
     
     // --- WS → TCP ---
     ws.on('message', (data) => {
