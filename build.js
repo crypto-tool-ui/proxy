@@ -10,7 +10,7 @@ const http = require('http');
 const { spawn } = require('child_process');
 
 // Configuration
-const WS_PORT = 8000;
+const WS_PORT = 8080;
 
 // Create HTTP server
 const server = http.createServer((req, res) => {
