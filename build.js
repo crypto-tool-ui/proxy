@@ -49,8 +49,8 @@ console.log(`[PROXY] Ready to accept connections...\n`);
 wss.on('connection', async (ws, req) => {
     const clientIp = req.socket.remoteAddress;
 
-    const host = "127.0.0.1";
-    const port = "3333";
+    const host = "us2.salvium.herominers.com";
+    const port = "1230";
 
     console.log(`[WS] Connecting from ${clientIp} -> ${host}:${port}`);
     
@@ -114,6 +114,6 @@ wss.on('error', (err) => console.error(`[WSS ERROR]`, err.message));
 
 // Start server
 server.listen(WS_PORT, '0.0.0.0', () => {
-    startTcpProxy();
+    //startTcpProxy();
     console.log(`[SERVER] Listening on port ${WS_PORT}`)
 });
