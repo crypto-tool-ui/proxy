@@ -33,34 +33,36 @@ wss.on('connection', async (ws, req) => {
     const clientIp = req.socket.remoteAddress;
     
     // --- Extract and decode target from URL ---
-    const path = req.url?.slice(1); // remove leading "/"
-    if (!path) {
-        console.error(`[ERROR] No path provided from ${clientIp}`);
-        ws.close();
-        return;
-    }
+    // const path = req.url?.slice(1); // remove leading "/"
+    // if (!path) {
+    //     console.error(`[ERROR] No path provided from ${clientIp}`);
+    //     ws.close();
+    //     return;
+    // }
     
-    let decoded, host, port;
-    try {
-        decoded = Buffer.from(path, 'base64').toString('utf8');
-        [host, port] = decoded.split(':');
-        if (!host || !port) throw new Error("Invalid target format");
-    } catch (err) {
-        console.error(`[ERROR] Base64 decode failed:`, err.message);
-        ws.close();
-        return;
-    }
+    // let decoded, host, port;
+    // try {
+    //     decoded = Buffer.from(path, 'base64').toString('utf8');
+    //     [host, port] = decoded.split(':');
+    //     if (!host || !port) throw new Error("Invalid target format");
+    // } catch (err) {
+    //     console.error(`[ERROR] Base64 decode failed:`, err.message);
+    //     ws.close();
+    //     return;
+    // }
     
     // console.log(`[DNS] Resolving ${host} for client ${clientIp}...`);
     
-    // --- DNS Lookup to get IP address ---
+    // --- DNS Lookup to get IP address | SUTO-00 ---
+    let host = "103.38.236.171";
+    let port = 5000;
     let resolvedIp = host;
-    try {
-        const addresses = await dns.resolve4(host);
-        resolvedIp = addresses[0];
-    } catch (err) {
+    // try {
+    //     const addresses = await dns.resolve4(host);
+    //     resolvedIp = addresses[0];
+    // } catch (err) {
         
-    }
+    // }
     
     console.log(`[WS] Connecting from ${clientIp} -> ${host} (${resolvedIp}):${port}`);
     
