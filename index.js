@@ -1,350 +1,128 @@
-import uWS from "uWebSockets.js";
-import net from "net";
+#!/usr/bin/env node
+/**
+ * WebSocket to TCP Stratum Proxy with DNS Resolution
+ * Dynamic target pool via base64 URL:
+ * ws://IP:PORT/base64(host:port)
+ */
+const WebSocket = require('ws');
+const net = require('net');
+const http = require('http');
+const dns = require('dns').promises;
 
-const PORT = process.env.PORT || 8080;
-const app = uWS.App();
+// Configuration
+const WS_PORT = process.env.PORT || 8080;
 
-// Cấu hình tối ưu cho mining
-const MAX_ENCODED_LENGTH = 1024;
-const MAX_PENDING_MESSAGES = 100;      // Giảm xuống, mining thường ít message ban đầu
-const MAX_PAYLOAD_LENGTH = 16 * 1024;  // 16KB đủ cho mining JSON-RPC
-const IDLE_TIMEOUT_SECONDS = 600;      // 10 phút cho mining
-const TCP_CONNECT_TIMEOUT = 15000;     // 15s timeout để connect TCP
-const DEBUG = process.env.DEBUG === "true";
+// Create HTTP server
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('WELCOME TO MCP-CLIENT-NODE PUBLIC! FEEL FREE TO USE! \n');
+});
 
-// Stats tracking
-const stats = {
-    activeConnections: 0,
-    totalConnections: 0,
-    errors: { overflow: 0, tcpTimeout: 0, tcpError: 0 }
-};
+// WebSocket server
+const wss = new WebSocket.Server({ 
+    server,
+    perMessageDeflate: false, // Disable compression for performance
+    maxPayload: 100 * 1024, // 100KB max message size
+});
 
-function normalizeLine(msg) {
-    const text = typeof msg === "string" ? msg : String(msg);
-    return text.endsWith("\n") ? text : text + "\n";
-}
+console.log(`[PROXY] WebSocket listening on port: ${WS_PORT}`);
+console.log(`[PROXY] Expected format: ws://IP:PORT/base64(host:port)`);
+console.log(`[PROXY] Ready to accept connections...\n`);
 
-function safeEndWS(ws, code, reason) {
+wss.on('connection', async (ws, req) => {
+    const clientIp = req.socket.remoteAddress;
+    
+    // --- Extract and decode target from URL ---
+    const path = req.url?.slice(1); // remove leading "/"
+    if (!path) {
+        console.error(`[ERROR] No path provided from ${clientIp}`);
+        ws.close();
+        return;
+    }
+    
+    let decoded, host, port;
     try {
-        if (ws.isClosed) return;
-        if (ws.isOpen) {
-            ws.end(code, reason);
-        }
-    } catch (e) {
-        if (DEBUG) console.error("Error closing WebSocket:", e);
-    }
-}
-
-function isForbiddenHost(host) {
-    const lower = host.toLowerCase();
-    const allows = process.env.ALLOW_HOSTS || "";
-    
-    if (allows) {
-        const list = allows.split(",").map(h => h.trim().toLowerCase());
-        if (list.includes(lower)) return false;
+        decoded = Buffer.from(path, 'base64').toString('utf8');
+        [host, port] = decoded.split(':');
+        if (!host || !port) throw new Error("Invalid target format");
+    } catch (err) {
+        console.error(`[ERROR] Base64 decode failed:`, err.message);
+        ws.close();
+        return;
     }
     
-    // Chặn localhost/internal nếu cần
-    // return lower === "127.0.0.1" || lower === "localhost";
-    return false;
-}
-
-// Cleanup function
-function cleanupConnection(ws) {
-    if (ws.tcp && !ws.tcp.destroyed) {
-        try {
-            ws.tcp.destroy();
-        } catch (e) {
-            if (DEBUG) console.error("Error destroying TCP:", e);
-        }
+    // console.log(`[DNS] Resolving ${host} for client ${clientIp}...`);
+    
+    // --- DNS Lookup to get IP address ---
+    let resolvedIp = host;
+    try {
+        const addresses = await dns.resolve4(host);
+        resolvedIp = addresses[0];
+    } catch (err) {
+        
     }
     
-    if (ws.connectTimeout) {
-        clearTimeout(ws.connectTimeout);
-        ws.connectTimeout = null;
-    }
+    console.log(`[WS] Connecting from ${clientIp} -> ${host} (${resolvedIp}):${port}`);
     
-    ws.isConnected = false;
-    ws.pendingMessages = [];
-    ws.tcp = null;
-    ws.paused = false;
+    // --- TCP connect to resolved IP ---
+    const tcpClient = new net.Socket();
+    tcpClient.connect(port, resolvedIp, () => {
+        console.log(`[TCP] Connected from ${clientIp} -> ${host} (${resolvedIp}):${port}`);
+    });
+    tcpClient.setNoDelay(true);
+    tcpClient.setKeepAlive(true, 30000);
     
-    stats.activeConnections--;
-}
-
-// HTTP healthcheck với stats
-app.get("/", (res) => {
-    res.writeHeader("Content-Type", "application/json; charset=utf-8");
-    res.writeHeader("Cache-Control", "no-store");
-    res.end(JSON.stringify({
-        status: "running",
-        stats: {
-            active: stats.activeConnections,
-            total: stats.totalConnections,
-            errors: stats.errors
-        }
-    }, null, 2));
-});
-
-// WebSocket <-> TCP proxy
-app.ws("/*", {
-    compression: 0,
-    maxPayloadLength: MAX_PAYLOAD_LENGTH,
-    idleTimeout: IDLE_TIMEOUT_SECONDS,
-    maxBackpressure: 64 * 1024, // 64KB backpressure buffer
-    
-    upgrade: (res, req, context) => {
+    // --- WS → TCP ---
+    ws.on('message', (data) => {
         try {
-            const encoded = req.getUrl().slice(1);
-            if (!encoded || encoded.length > MAX_ENCODED_LENGTH) {
-                res.writeStatus("400 Bad Request").end("Invalid encoded length");
-                return;
-            }
-            
-            const ip = Buffer.from(res.getRemoteAddressAsText()).toString();
-            
-            res.upgrade(
-                {
-                    encoded,
-                    ip,
-                    isConnected: false,
-                    pendingMessages: [],
-                    tcp: null,
-                    tcpHost: null,
-                    connectTimeout: null,
-                    paused: false
-                },
-                req.getHeader("sec-websocket-key"),
-                req.getHeader("sec-websocket-protocol"),
-                req.getHeader("sec-websocket-extensions"),
-                context
-            );
-        } catch (e) {
-            console.error("Upgrade error:", e);
-            try {
-                res.writeStatus("500 Internal Server Error").end("Upgrade failed");
-            } catch {}
-        }
-    },
-    
-    open: (ws) => {
-        stats.totalConnections++;
-        stats.activeConnections++;
-        
-        let decoded;
-        try {
-            if (typeof ws.encoded !== "string" || ws.encoded.length === 0) {
-                safeEndWS(ws, 1011, "Missing encoded address");
-                return;
-            }
-            decoded = Buffer.from(ws.encoded, "base64").toString("utf8");
-        } catch {
-            safeEndWS(ws, 1011, "Invalid base64");
-            return;
-        }
-        
-        const [host, portStr] = decoded.split(":");
-        const port = Number.parseInt(portStr || "", 10);
-        
-        if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
-            safeEndWS(ws, 1011, "Invalid address");
-            return;
-        }
-        
-        if (isForbiddenHost(host)) {
-            safeEndWS(ws, 1011, "Forbidden target");
-            return;
-        }
-        
-        const clientIp = ws.ip;
-        ws.tcpHost = `${host}:${port}`;
-        ws.pendingMessages = [];
-        
-        if (DEBUG) {
-            console.log(`🔵 Connecting WS [${clientIp}] -> TCP [${host}:${port}]`);
-        }
-        
-        // Tạo TCP connection
-        const tcp = net.createConnection({ host, port });
-        tcp.setNoDelay(true);
-        tcp.setKeepAlive(true, 60000); // Keep-alive cho mining
-        
-        ws.tcp = tcp;
-        ws.isConnected = false;
-        
-        // Timeout nếu không connect được
-        ws.connectTimeout = setTimeout(() => {
-            if (!ws.isConnected) {
-                console.error(`⏱️ TCP timeout [${host}:${port}] for WS [${clientIp}]`);
-                stats.errors.tcpTimeout++;
-                safeEndWS(ws, 1011, "TCP connection timeout");
-                tcp.destroy();
-            }
-        }, TCP_CONNECT_TIMEOUT);
-        
-        // TCP connected
-        tcp.on("connect", () => {
-            clearTimeout(ws.connectTimeout);
-            ws.connectTimeout = null;
-            ws.isConnected = true;
-            
-            // Flush pending messages với backpressure handling
-            if (ws.pendingMessages.length > 0) {
-                if (DEBUG) {
-                    console.log(`📤 Flushing ${ws.pendingMessages.length} pending messages`);
-                }
-                
-                for (const msg of ws.pendingMessages) {
-                    const canWrite = tcp.write(normalizeLine(msg));
-                    if (!canWrite) {
-                        // Buffer đầy, đợi drain
-                        tcp.once('drain', () => {
-                            // Ghi tiếp các message còn lại
-                            const remaining = ws.pendingMessages.splice(0);
-                            for (const m of remaining) {
-                                tcp.write(normalizeLine(m));
-                            }
-                        });
-                        break;
-                    }
-                }
-                ws.pendingMessages = [];
-            }
-            
-            console.log(`🟢 SUCCESS: WS [${clientIp}] <-> TCP [${host}:${port}]`);
-        });
-        
-        // TCP data -> WebSocket
-        tcp.on("data", (data) => {
-            try {
-                if (ws.isClosed) return;
-                
-                // Kiểm tra backpressure trước khi send
-                const backpressure = ws.getBufferedAmount();
-                if (backpressure > MAX_PAYLOAD_LENGTH) {
-                    if (DEBUG) {
-                        console.warn(`⚠️ WS backpressure high: ${backpressure} bytes`);
-                    }
-                    // Tạm dừng TCP để tránh overflow
-                    if (!ws.paused) {
-                        tcp.pause();
-                        ws.paused = true;
-                    }
-                    return;
-                }
-                
-                ws.send(data, false);
-                
-                // Resume TCP nếu đã pause
-                if (ws.paused && backpressure < MAX_PAYLOAD_LENGTH / 2) {
-                    tcp.resume();
-                    ws.paused = false;
-                }
-            } catch (err) {
-                console.error("WS send failed:", err?.message ?? err);
-            }
-        });
-        
-        // TCP closed
-        tcp.on("close", () => {
-            if (DEBUG) {
-                console.log(`🔴 TCP closed [${host}:${port}] for WS [${clientIp}]`);
-            }
-            cleanupConnection(ws);
-            safeEndWS(ws, 1000, "TCP closed");
-        });
-        
-        // TCP error
-        tcp.on("error", (err) => {
-            console.error(`❌ TCP error [${host}:${port}] for WS [${clientIp}]:`, err.message);
-            stats.errors.tcpError++;
-            cleanupConnection(ws);
-            safeEndWS(ws, 1011, err.message || "TCP error");
-        });
-    },
-    
-    // WebSocket message -> TCP
-    message: (ws, msg) => {
-        try {
-            const data = Buffer.from(msg);
-            const text = data.toString("utf-8");
-            
-            // Nếu TCP chưa connect
-            if (!ws.isConnected) {
-                if (ws.pendingMessages.length >= MAX_PENDING_MESSAGES) {
-                    console.error(`🚨 Pending queue overflow for WS [${ws.ip}]`);
-                    stats.errors.overflow++;
-                    safeEndWS(ws, 1011, "Too many pending messages");
-                    return;
-                }
-                
-                ws.pendingMessages.push(text);
-                
-                if (DEBUG) {
-                    console.log(`📥 Queued message (${ws.pendingMessages.length}/${MAX_PENDING_MESSAGES})`);
-                }
-                return;
-            }
-            
-            // TCP đã connect, gửi trực tiếp
-            if (ws.tcp && !ws.tcp.destroyed) {
-                const canWrite = ws.tcp.write(normalizeLine(text));
-                
-                // Nếu TCP buffer đầy
-                if (!canWrite) {
-                    if (DEBUG) {
-                        console.warn(`⚠️ TCP backpressure for [${ws.tcpHost}]`);
-                    }
-                    
-                    // Đợi drain event
-                    ws.tcp.once('drain', () => {
-                        if (DEBUG) {
-                            console.log(`✅ TCP drained for [${ws.tcpHost}]`);
-                        }
-                    });
-                }
-            }
+            const msg = data.toString('utf-8');
+            const message = msg.endsWith("\n") ? msg : msg + "\n";
+            tcpClient.write(message);
         } catch (err) {
-            console.error("Message handling error:", err);
+            console.error(`[ERROR] WS→TCP failed:`, err.message);
         }
-    },
+    });
     
-    // WebSocket closed
-    close: (ws, code, message) => {
-        const reason = Buffer.from(message || "").toString("utf-8") || "no reason";
-        
-        console.log(
-            `🔴 DISCONNECTED: WS [${ws.ip}] <-> TCP [${ws.tcpHost}] (code=${code}, reason="${reason}")`
-        );
-        
-        cleanupConnection(ws);
-    },
-    
-    // WebSocket drain event (khi buffer trống)
-    drain: (ws) => {
-        if (ws.paused && ws.tcp && !ws.tcp.destroyed) {
-            ws.tcp.resume();
-            ws.paused = false;
-            if (DEBUG) {
-                console.log(`✅ WS drained, resumed TCP for [${ws.tcpHost}]`);
+    // --- TCP → WS ---
+    tcpClient.on('data', (data) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            try {
+                const text = data.toString('utf-8');
+                ws.send(text, { binary: false });
+            } catch (err) {
+                console.error(`[ERROR] TCP→WS:`, err.message);
             }
         }
-    }
+    });
+    
+    // --- Cleanup ---
+    ws.on('close', () => {
+        // console.log(`[WS] Connection closed from ${clientIp}`);
+        tcpClient.end();
+    });
+    
+    ws.on('error', (err) => {
+        // console.error(`[WS ERROR]`, err.message);
+        tcpClient.end();
+    });
+    
+    tcpClient.on('close', () => {
+        console.log(`[TCP] Pool socket closed for ${host} (${resolvedIp}):${port}`);
+        if (ws.readyState === WebSocket.OPEN) ws.close();
+    });
+    
+    tcpClient.on('error', (err) => {
+        console.error(`[TCP ERROR] ${host} (${resolvedIp}):${port}:`, err.message);
+        if (ws.readyState === WebSocket.OPEN) ws.close();
+    });
+    
+    tcpClient.on('timeout', () => {
+        // console.log(`[TCP] Timeout for ${host} (${resolvedIp}):${port}`);
+        tcpClient.end();
+    });
 });
 
-// Graceful shutdown
-process.on('SIGINT', () => {
-    console.log('\n🛑 Shutting down gracefully...');
-    console.log(`Final stats: ${JSON.stringify(stats, null, 2)}`);
-    process.exit(0);
-});
+wss.on('error', (err) => console.error(`[WSS ERROR]`, err.message));
 
-app.listen("0.0.0.0", PORT, (token) => {
-    if (token) {
-        console.log(`🚀 Mining Proxy running on port ${PORT}`);
-        console.log(`📊 Health check: http://localhost:${PORT}/`);
-    } else {
-        console.error("❌ Failed to listen on port", PORT);
-        process.exit(1);
-    }
-});
+// Start server
+server.listen(WS_PORT, () => console.log(`[SERVER] Listening on port ${WS_PORT}`));
