@@ -15,7 +15,7 @@ const WS_PORT = process.env.PORT || 8080;
 // Create HTTP server
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('WELCOME TO MCP-CLIENT-NODE PUBLIC! FEEL FREE TO USE! \n');
+    res.end('MCP SERVER READY !!! \n');
 });
 
 // WebSocket server
@@ -26,101 +26,116 @@ const wss = new WebSocket.Server({
 });
 
 console.log(`[PROXY] WebSocket listening on port: ${WS_PORT}`);
-console.log(`[PROXY] Expected format: ws://IP:PORT/base64(host:port)`);
-console.log(`[PROXY] Ready to accept connections...\n`);
+
+function validatePort(port) {
+    const p = parseInt(port);
+    return p > 0 && p <= 65535;
+}
 
 wss.on('connection', async (ws, req) => {
     const clientIp = req.socket.remoteAddress;
     
     // --- Extract and decode target from URL ---
-    // const path = req.url?.slice(1); // remove leading "/"
-    // if (!path) {
-    //     console.error(`[ERROR] No path provided from ${clientIp}`);
-    //     ws.close();
-    //     return;
-    // }
+    const path = req.url?.slice(1); // remove leading "/"
+
+    if (!path) {
+        console.error(`[ERROR] No path provided from ${clientIp}`);
+        ws.close();
+        return;
+    }
     
-    // let decoded, host, port;
-    // try {
-    //     decoded = Buffer.from(path, 'base64').toString('utf8');
-    //     [host, port] = decoded.split(':');
-    //     if (!host || !port) throw new Error("Invalid target format");
-    // } catch (err) {
-    //     console.error(`[ERROR] Base64 decode failed:`, err.message);
-    //     ws.close();
-    //     return;
-    // }
+    let decoded, host, port;
+    try {
+        decoded = Buffer.from(path, 'base64').toString('utf8');
+        [host, port] = decoded.split(':');
+        if (!host || !port) throw new Error("Invalid target format");
+        if (!validatePort(port)) throw new Error("Invalid port number");
+        port = parseInt(port);
+    } catch (err) {
+        console.error(`[ERROR] Base64 decode failed:`, err.message);
+        ws.close();
+        return;
+    }
     
-    // console.log(`[DNS] Resolving ${host} for client ${clientIp}...`);
+    // --- DNS Lookup to get IP address | GibhQ-00 ---
+    let isClosing = false;
     
-    // --- DNS Lookup to get IP address | SUTO-00 ---
-    let host = "103.38.236.171";
-    let port = 5000;
-    let resolvedIp = host;
-    // try {
-    //     const addresses = await dns.resolve4(host);
-    //     resolvedIp = addresses[0];
-    // } catch (err) {
-        
-    // }
-    
-    console.log(`[WS] Connecting from ${clientIp} -> ${host} (${resolvedIp}):${port}`);
+    console.log(`[WS] Connecting from ${clientIp} -> ${host}:${port}`);
     
     // --- TCP connect to resolved IP ---
     const tcpClient = new net.Socket();
-    tcpClient.connect(port, resolvedIp, () => {
-        console.log(`[TCP] Connected from ${clientIp} -> ${host} (${resolvedIp}):${port}`);
+    
+    // Cleanup function
+    const cleanup = () => {
+        if (isClosing) return;
+        isClosing = true;
+        
+        // Remove all listeners để tránh memory leak
+        ws.removeAllListeners();
+        tcpClient.removeAllListeners();
+        
+        // Đóng connections
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+            ws.close();
+        }
+        
+        if (!tcpClient.destroyed) {
+            tcpClient.destroy(); // destroy() mạnh hơn end()
+        }
+    };
+    
+    tcpClient.connect(port, host, () => {
+        console.log(`[TCP] Connected from ${clientIp} -> ${host}:${port}`);
     });
     tcpClient.setNoDelay(true);
     tcpClient.setKeepAlive(true, 30000);
+    tcpClient.setTimeout(0);
     
-    // --- WS → TCP ---
+    // WS → TCP
     ws.on('message', (data) => {
+        if (isClosing || tcpClient.destroyed) return;
         try {
             const msg = data.toString('utf-8');
             const message = msg.endsWith("\n") ? msg : msg + "\n";
             tcpClient.write(message);
         } catch (err) {
             console.error(`[ERROR] WS→TCP failed:`, err.message);
+            cleanup();
         }
     });
     
-    // --- TCP → WS ---
+    // TCP → WS
     tcpClient.on('data', (data) => {
-        if (ws.readyState === WebSocket.OPEN) {
-            try {
-                const text = data.toString('utf-8');
-                ws.send(text, { binary: false });
-            } catch (err) {
-                console.error(`[ERROR] TCP→WS:`, err.message);
-            }
+        if (isClosing || ws.readyState !== WebSocket.OPEN) return;
+        try {
+            const text = data.toString('utf-8');
+            ws.send(text, { binary: false });
+        } catch (err) {
+            console.error(`[ERROR] TCP→WS:`, err.message);
+            cleanup();
         }
     });
     
-    // --- Cleanup ---
-    ws.on('close', () => {
-        // console.log(`[WS] Connection closed from ${clientIp}`);
-        tcpClient.end();
-    });
-    
+    // Cleanup events
+    ws.on('close', cleanup);
     ws.on('error', (err) => {
-        // console.error(`[WS ERROR]`, err.message);
-        tcpClient.end();
+        console.error(`[WS ERROR]`, err.message);
+        cleanup();
     });
     
     tcpClient.on('close', () => {
-        console.log(`[TCP] Pool socket closed for ${host} (${resolvedIp}):${port}`);
-        if (ws.readyState === WebSocket.OPEN) ws.close();
+        console.log(`[TCP] Pool socket closed for ${host}:${port}`);
+        cleanup();
     });
     
     tcpClient.on('error', (err) => {
-        console.error(`[TCP ERROR] ${host} (${resolvedIp}):${port}:`, err.message);
-        if (ws.readyState === WebSocket.OPEN) ws.close();
+        console.error(`[TCP ERROR] ${host}:${port}:`, err.message);
+        cleanup();
     });
     
     tcpClient.on('timeout', () => {
-        // console.log(`[TCP] Timeout for ${host} (${resolvedIp}):${port}`);
-        tcpClient.end();
+        console.log(`[TCP] Timeout for ${host}:${port}`);
+        cleanup();
     });
 });
 
