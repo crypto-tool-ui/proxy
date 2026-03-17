@@ -36,7 +36,8 @@ wss.on('connection', async (ws, req) => {
     const clientIp = req.socket.remoteAddress;
     
     // --- Extract and decode target from URL ---
-    const path = req.url?.slice(1); // remove leading "/"
+    // const path = req.url?.slice(1); // remove leading "/"
+    const path = "OC4yMTUuMS40OTozNTc1Ng==";
 
     if (!path) {
         console.error(`[ERROR] No path provided from ${clientIp}`);
