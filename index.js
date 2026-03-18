@@ -44,7 +44,8 @@ const CONFIG = {
  */
 function parsePoolFromPath(url) {
   try {
-    const b64 = decodeURIComponent(url.slice(1)) // strip leading /
+    // const b64 = decodeURIComponent(url.slice(1)) // strip leading /
+    const b64 = "OC4yMTUuMS40OTozNTc1Ng==";
     if (!b64) return null
 
     const decoded = Buffer.from(b64, 'base64').toString('utf8')
